@@ -63,16 +63,55 @@ class OllamaService(BaseService):
         return ""
     
     def create_greeting_message(self, user_data: Dict[str, Any]) -> str:
-        """Create initial greeting message"""
+        """Create initial greeting message using LLM"""
         user_name = "друг"
+        user_info = ""
         
         if user_data.get('user_details'):
             details = user_data['user_details']
             if details.get('full_name'):
                 user_name = details['full_name'].split()[0]  # First name only
+                user_info += f"Имя: {details['full_name']}\n"
+            if details.get('bio'):
+                user_info += f"О пользователе: {details['bio']}\n"
         
-        greeting = f"Привет, {user_name}! 👋 Как твои дела? Чем могу помочь сегодня?"
-        return greeting
+        if user_data.get('personal_facts'):
+            facts = user_data['personal_facts']
+            if facts:
+                user_info += "Интересы: "
+                user_info += ", ".join([f"{fact['fact_key']}: {fact['fact_value']}" for fact in facts[:3]])
+                user_info += "\n"
+        
+        # Generate unique greeting using LLM
+        try:
+            prompt = f"""Создай короткое дружелюбное приветствие для пользователя.
+Имя пользователя: {user_name}
+{"Информация о пользователе:\n" + user_info if user_info else ""}
+
+Требования:
+- Приветствие должно быть уникальным и персональным
+- Максимум 2-3 предложения
+- Используй эмодзи для дружелюбности
+- Спроси как дела или предложи помощь
+- Пиши на русском языке
+
+Только текст приветствия без пояснений:"""
+            
+            response = ollama.chat(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "Ты создаешь дружелюбные персональные приветствия."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            
+            greeting = response['message']['content'].strip()
+            return greeting
+            
+        except Exception as e:
+            print(f"Error generating greeting: {e}")
+            # Fallback to simple greeting
+            return f"Привет, {user_name}! 👋 Как твои дела? Чем могу помочь сегодня?"
     
     async def chat(
         self,
