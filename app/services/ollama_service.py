@@ -66,6 +66,9 @@ class OllamaService(BaseService):
         """Create initial greeting message using LLM"""
         user_name = "друг"
         user_info = ""
+        language = settings.DEFAULT_LANGUAGE
+
+        print(f"language detected: {language}")
         
         if user_data.get('user_details'):
             details = user_data['user_details']
@@ -78,6 +81,12 @@ class OllamaService(BaseService):
         if user_data.get('personal_facts'):
             facts = user_data['personal_facts']
             if facts:
+                # Check for language preference in facts
+                for fact in facts:
+                    if fact['fact_key'].lower() in ['язык', 'language', 'preferred_language']:
+                        language = fact['fact_value']
+                        break
+                
                 user_info += "Интересы: "
                 user_info += ", ".join([f"{fact['fact_key']}: {fact['fact_value']}" for fact in facts[:3]])
                 user_info += "\n"
@@ -86,6 +95,7 @@ class OllamaService(BaseService):
         try:
             prompt = f"""Создай короткое дружелюбное приветствие для пользователя.
 Имя пользователя: {user_name}
+Язык общения: {language}
 {"Информация о пользователе:\n" + user_info if user_info else ""}
 
 Требования:
@@ -93,14 +103,14 @@ class OllamaService(BaseService):
 - Максимум 2-3 предложения
 - Используй эмодзи для дружелюбности
 - Спроси как дела или предложи помощь
-- Пиши на русском языке
+- Пиши ОБЯЗАТЕЛЬНО на языке: {language}
 
 Только текст приветствия без пояснений:"""
             
             response = ollama.chat(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "Ты создаешь дружелюбные персональные приветствия."},
+                    {"role": "system", "content": f"Ты создаешь дружелюбные персональные приветствия на языке: {language}."},
                     {"role": "user", "content": prompt}
                 ]
             )
@@ -121,6 +131,9 @@ class OllamaService(BaseService):
     ) -> str:
         """Send a message to Ollama and get response"""
         try:
+            # Detect message language
+            message_language = self._detect_language(message)
+            
             messages = []
             
             # Add system message with user context if available
@@ -129,12 +142,14 @@ class OllamaService(BaseService):
 
 {user_context}
 
+ВАЖНО: Пользователь пишет на языке: {message_language}. Отвечай ОБЯЗАТЕЛЬНО на том же языке, на котором задан вопрос.
+
 Используй эту информацию для персонализации разговора. Будь естественным и дружелюбным."""
                 messages.append({"role": "system", "content": system_message})
             else:
                 messages.append({
                     "role": "system",
-                    "content": "Ты дружелюбный и полезный AI-ассистент. Общайся естественно и помогай пользователю."
+                    "content": f"Ты дружелюбный и полезный AI-ассистент. ВАЖНО: Отвечай на том же языке ({message_language}), на котором пользователь пишет сообщение. Общайся естественно и помогай пользователю."
                 })
             
             # Add chat history
@@ -155,6 +170,30 @@ class OllamaService(BaseService):
         except Exception as e:
             print(f"Error in Ollama chat: {e}")
             return f"Извините, произошла ошибка при обработке вашего сообщения: {str(e)}"
+    
+    def _detect_language(self, text: str) -> str:
+        """Detect language of the text (simple heuristic)"""
+        # Check for Hebrew characters
+        if any('\u0590' <= char <= '\u05FF' for char in text):
+            return "иврит"
+        # Check for Cyrillic characters (Russian, Ukrainian, etc.)
+        elif any('\u0400' <= char <= '\u04FF' for char in text):
+            return "русский"
+        # Check for common English words
+        elif any(word in text.lower() for word in ['the', 'is', 'are', 'what', 'how', 'hello', 'hi']):
+            return "английский"
+        # Check for common Spanish words
+        elif any(word in text.lower() for word in ['el', 'la', 'es', 'hola', 'que', 'como']):
+            return "испанский"
+        # Check for common German words
+        elif any(word in text.lower() for word in ['der', 'die', 'das', 'ist', 'sind', 'hallo']):
+            return "немецкий"
+        # Check for common French words
+        elif any(word in text.lower() for word in ['le', 'la', 'est', 'sont', 'bonjour', 'salut']):
+            return "французский"
+        else:
+            # Default to configured language
+            return settings.DEFAULT_LANGUAGE
 
 
 # Singleton instance

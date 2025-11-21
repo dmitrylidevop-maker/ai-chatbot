@@ -192,6 +192,15 @@ class DatabaseService(BaseService):
             for fact in personal_facts
         ]
         
+        # Extract preferred language if exists
+        from app.config import get_settings
+        settings = get_settings()
+        context['preferred_language'] = settings.DEFAULT_LANGUAGE
+        for fact in personal_facts:
+            if fact.fact_key.lower() in ['язык', 'language', 'preferred_language']:
+                context['preferred_language'] = fact.fact_value
+                break
+        
         return context
 
 
