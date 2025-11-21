@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.database import init_db
-from app.api import auth, chat, user
+from app.api import auth, chat, user, static_data
 from app.services.ollama_service import ollama_service
 
 settings = get_settings()
@@ -26,6 +26,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(user.router)
+app.include_router(static_data.router)
 
 
 @app.on_event("startup")

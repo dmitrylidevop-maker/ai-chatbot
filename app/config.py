@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     # Language
     DEFAULT_LANGUAGE: str = "russian"
     
+    # Telegram Bot (optional - only needed for Telegram bot)
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_ADMIN_IDS: str = ""  # Comma-separated list of admin Telegram IDs
+    
     @property
     def database_url(self) -> str:
         return f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"

@@ -2,6 +2,7 @@ from typing import List, Dict, Any, Optional
 import ollama
 from app.config import get_settings
 from app.services.base import BaseService
+from app.database import SessionLocal
 
 settings = get_settings()
 
@@ -13,6 +14,27 @@ class OllamaService(BaseService):
         self.model = settings.OLLAMA_MODEL
         self.base_url = settings.OLLAMA_BASE_URL
         self.client = None
+        self._ai_rules_cache = None
+    
+    def _get_ai_behavior_rules(self) -> List[str]:
+        """Get AI behavior rules from database (with caching)"""
+        if self._ai_rules_cache is None:
+            db = SessionLocal()
+            try:
+                from app.services.database_service import db_service
+                self._ai_rules_cache = db_service.get_ai_behavior_rules(db)
+            except Exception as e:
+                print(f"Error loading AI rules: {e}")
+                self._ai_rules_cache = []
+            finally:
+                db.close()
+        
+        return self._ai_rules_cache
+    
+    def reload_ai_rules(self):
+        """Force reload AI behavior rules from database"""
+        self._ai_rules_cache = None
+        return self._get_ai_behavior_rules()
     
     async def initialize(self) -> bool:
         """Initialize Ollama service"""
@@ -134,23 +156,37 @@ class OllamaService(BaseService):
             # Detect message language
             message_language = self._detect_language(message)
             
+            # Get AI behavior rules
+            ai_rules = self._get_ai_behavior_rules()
+            
             messages = []
             
-            # Add system message with user context if available
+            # Build system message
+            system_parts = []
+            
+            # Add AI behavior rules
+            if ai_rules:
+                system_parts.append("ПРАВИЛА ПОВЕДЕНИЯ:")
+                for i, rule in enumerate(ai_rules, 1):
+                    system_parts.append(f"{i}. {rule}")
+                system_parts.append("")  # Empty line
+            
+            # Add user context if available
             if user_context:
-                system_message = f"""Ты дружелюбный помощник. Вот информация о пользователе, с которым ты общаешься:
-
-{user_context}
-
-ВАЖНО: Пользователь пишет на языке: {message_language}. Отвечай ОБЯЗАТЕЛЬНО на том же языке, на котором задан вопрос.
-
-Используй эту информацию для персонализации разговора. Будь естественным и дружелюбным."""
-                messages.append({"role": "system", "content": system_message})
+                system_parts.append("ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ:")
+                system_parts.append(user_context)
+                system_parts.append("")  # Empty line
+            
+            # Add language instruction
+            system_parts.append(f"ВАЖНО: Пользователь пишет на языке: {message_language}. Отвечай ОБЯЗАТЕЛЬНО на том же языке, на котором задан вопрос.")
+            
+            if user_context:
+                system_parts.append("\nИспользуй информацию о пользователе для персонализации разговора. Будь естественным и дружелюбным.")
             else:
-                messages.append({
-                    "role": "system",
-                    "content": f"Ты дружелюбный и полезный AI-ассистент. ВАЖНО: Отвечай на том же языке ({message_language}), на котором пользователь пишет сообщение. Общайся естественно и помогай пользователю."
-                })
+                system_parts.append("\nОбщайся естественно и помогай пользователю.")
+            
+            system_message = "\n".join(system_parts)
+            messages.append({"role": "system", "content": system_message})
             
             # Add chat history
             for msg in chat_history:

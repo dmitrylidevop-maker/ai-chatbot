@@ -68,3 +68,18 @@ class ChatHistory(Base):
     
     # Relationships
     user = relationship("User", back_populates="chat_history")
+
+
+class StaticData(Base):
+    """Static configuration data for AI behavior and system rules"""
+    __tablename__ = "static_data"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    category = Column(String(100), nullable=False, index=True)  # e.g., 'ai_behavior', 'system_rules'
+    key = Column(String(100), nullable=False, index=True)
+    value = Column(Text, nullable=False)
+    description = Column(Text)  # Optional description of the rule
+    is_active = Column(Integer, default=1)  # 1 = active, 0 = inactive
+    priority = Column(Integer, default=0)  # Higher priority rules are applied first
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())

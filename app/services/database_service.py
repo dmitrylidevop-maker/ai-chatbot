@@ -2,7 +2,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from datetime import datetime
 import uuid
-from app.models.user import User, UserDetails, PersonalFact, ChatHistory
+from app.models.user import User, UserDetails, PersonalFact, ChatHistory, StaticData
 from app.schemas import (
     UserDetailsCreate, UserDetailsUpdate,
     PersonalFactCreate, PersonalFactUpdate
@@ -20,6 +20,82 @@ class DatabaseService(BaseService):
     async def health_check(self) -> bool:
         """Check database health"""
         return True
+    
+    # User operations
+    def get_user_by_telegram_id(self, db: Session, telegram_id: int) -> Optional[User]:
+        """Get user by telegram_id from personal facts"""
+        fact = db.query(PersonalFact).filter(
+            PersonalFact.fact_key == "telegram_id",
+            PersonalFact.fact_value == str(telegram_id)
+        ).first()
+        
+        if fact:
+            return db.query(User).filter(User.id == fact.user_id).first()
+        return None
+    
+    def create_user(self, db: Session, user_data: Dict[str, str]) -> Optional[User]:
+        """Create new user"""
+        import bcrypt
+        
+        # Hash password using bcrypt directly
+        password_bytes = user_data["password"].encode('utf-8')
+        hashed = bcrypt.hashpw(password_bytes, bcrypt.gensalt())
+        
+        new_user = User(
+            username=user_data["username"],
+            password_hash=hashed.decode('utf-8')
+        )
+        
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        return new_user
+    
+    def get_user_with_details(self, db: Session, user_id: str) -> Dict[str, Any]:
+        """Get user with all details and facts"""
+        return self.get_user_context(db, user_id)
+    
+    def create_chat_session(self, db: Session, user_id: str) -> Optional[ChatHistory]:
+        """Create new chat session"""
+        session_id = self.get_session_id()
+        # Create initial message to mark session start
+        return self.save_message(db, user_id, session_id, "system", "Session started")
+    
+    def get_chat_history(self, db: Session, session_id: str, limit: int = 50) -> List[Dict[str, str]]:
+        """Get chat history formatted for LLM"""
+        messages = db.query(ChatHistory).filter(
+            ChatHistory.session_id == session_id,
+            ChatHistory.role.in_(["user", "assistant"])
+        ).order_by(ChatHistory.created_at.asc()).limit(limit).all()
+        
+        return [
+            {
+                "role": msg.role,
+                "message": msg.message
+            }
+            for msg in messages
+        ]
+    
+    def save_chat_message(
+        self,
+        db: Session,
+        session_id: str,
+        role: str,
+        message: str
+    ) -> ChatHistory:
+        """Save chat message (simplified, gets user_id from session)"""
+        # Get user_id from existing session messages
+        existing = db.query(ChatHistory).filter(
+            ChatHistory.session_id == session_id
+        ).first()
+        
+        if existing:
+            user_id = existing.user_id
+        else:
+            # Fallback - shouldn't happen
+            user_id = "000000001"
+        
+        return self.save_message(db, user_id, session_id, role, message)
     
     # User Details operations
     def get_user_details(self, db: Session, user_id: str) -> Optional[UserDetails]:
@@ -202,6 +278,70 @@ class DatabaseService(BaseService):
                 break
         
         return context
+    
+    # Static Data operations
+    def get_ai_behavior_rules(self, db: Session) -> List[str]:
+        """Get all active AI behavior rules sorted by priority"""
+        rules = db.query(StaticData).filter(
+            StaticData.category == 'ai_behavior',
+            StaticData.is_active == 1
+        ).order_by(StaticData.priority.desc()).all()
+        
+        return [rule.value for rule in rules]
+    
+    def get_static_data(self, db: Session, category: str) -> List[StaticData]:
+        """Get all active static data by category"""
+        return db.query(StaticData).filter(
+            StaticData.category == category,
+            StaticData.is_active == 1
+        ).order_by(StaticData.priority.desc()).all()
+    
+    def add_static_data(
+        self,
+        db: Session,
+        category: str,
+        key: str,
+        value: str,
+        description: str = None,
+        priority: int = 0
+    ) -> StaticData:
+        """Add new static data rule"""
+        static_data = StaticData(
+            category=category,
+            key=key,
+            value=value,
+            description=description,
+            priority=priority,
+            is_active=1
+        )
+        db.add(static_data)
+        db.commit()
+        db.refresh(static_data)
+        return static_data
+    
+    def update_static_data(
+        self,
+        db: Session,
+        rule_id: int,
+        value: str = None,
+        is_active: int = None,
+        priority: int = None
+    ) -> Optional[StaticData]:
+        """Update existing static data rule"""
+        rule = db.query(StaticData).filter(StaticData.id == rule_id).first()
+        if not rule:
+            return None
+        
+        if value is not None:
+            rule.value = value
+        if is_active is not None:
+            rule.is_active = is_active
+        if priority is not None:
+            rule.priority = priority
+        
+        db.commit()
+        db.refresh(rule)
+        return rule
 
 
 # Singleton instance
