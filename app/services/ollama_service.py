@@ -15,6 +15,14 @@ class OllamaService(BaseService):
         self.base_url = settings.OLLAMA_BASE_URL
         self.client = None
         self._ai_rules_cache = None
+        self._search_service = None
+    
+    def _get_search_service(self):
+        """Lazy load search service"""
+        if self._search_service is None:
+            from app.services.search_service import search_service
+            self._search_service = search_service
+        return self._search_service
     
     def _get_ai_behavior_rules(self) -> List[str]:
         """Get AI behavior rules from database (with caching)"""
@@ -145,6 +153,65 @@ class OllamaService(BaseService):
             # Fallback to simple greeting
             return f"Привет, {user_name}! 👋 Как твои дела? Чем могу помочь сегодня?"
     
+    def _check_if_search_requested(self, message: str) -> tuple[bool, str]:
+        """
+        Check if user explicitly requested web search
+        
+        Args:
+            message: User's message
+        
+        Returns:
+            Tuple of (search_needed, search_query)
+        """
+        # Keywords that explicitly request search
+        search_triggers = [
+            'найди в интернете', 'поищи в интернете', 'найди в гугл', 'поищи в гугл',
+            'загугли', 'погугли', 'найди информацию', 'поищи информацию',
+            'search in google', 'search for', 'google for', 'find in google',
+            'look up', 'search the web', 'search online', 'гугл', 'найди'
+        ]
+        
+        message_lower = message.lower()
+        
+        for trigger in search_triggers:
+            if trigger in message_lower:
+                # Extract search query by removing the trigger phrase
+                query = message_lower.replace(trigger, '').strip()
+                # Remove common punctuation at the start
+                query = query.lstrip(':-,.')
+                return True, query if query else message
+        
+        return False, ""
+    
+    def _perform_search_and_summarize(self, query: str, language: str) -> Optional[str]:
+        """
+        Perform web search and summarize results using LLM
+        
+        Args:
+            query: Search query
+            language: Language for the summary
+        
+        Returns:
+            Summarized search results or None if failed
+        """
+        try:
+            search_service = self._get_search_service()
+            
+            # Perform search
+            search_results = search_service.search_web(query, num_results=5)
+            
+            if not search_results:
+                return None
+            
+            # Format results
+            formatted_results = search_service.format_search_results(search_results)
+            
+            return formatted_results
+            
+        except Exception as e:
+            print(f"Error performing search: {e}")
+            return None
+    
     async def chat(
         self,
         message: str,
@@ -159,6 +226,13 @@ class OllamaService(BaseService):
             # Get AI behavior rules
             ai_rules = self._get_ai_behavior_rules()
             
+            # Check if user explicitly requested web search
+            search_results = None
+            search_requested, search_query = self._check_if_search_requested(message)
+            if search_requested and settings.GOOGLE_SEARCH_ENABLED:
+                print(f"🔍 User requested web search for: {search_query[:50]}...")
+                search_results = self._perform_search_and_summarize(search_query, message_language)
+            
             messages = []
             
             # Build system message
@@ -169,6 +243,12 @@ class OllamaService(BaseService):
                 system_parts.append("ПРАВИЛА ПОВЕДЕНИЯ:")
                 for i, rule in enumerate(ai_rules, 1):
                     system_parts.append(f"{i}. {rule}")
+                system_parts.append("")  # Empty line
+            
+            # Add search results if available
+            if search_results:
+                system_parts.append(search_results)
+                system_parts.append("ВАЖНО: Используй эту актуальную информацию из интернета для ответа на вопрос пользователя.")
                 system_parts.append("")  # Empty line
             
             # Add user context if available

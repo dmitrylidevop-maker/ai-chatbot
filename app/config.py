@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_ADMIN_IDS: str = ""  # Comma-separated list of admin Telegram IDs
     
+    # Google Search (optional - for web search functionality)
+    GOOGLE_SEARCH_ENABLED: bool = True
+    GOOGLE_MAX_RESULTS: int = 5
+    
     @property
     def database_url(self) -> str:
         return f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
